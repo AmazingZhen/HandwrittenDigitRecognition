@@ -21,32 +21,55 @@ using namespace std;
 int reverseDigit(int i);
 vector<Mat> readDigits(string filepath);
 Mat_<int> readLabels(string filePath);
-Mat_<float> extractFeatures(vector<Mat> trainDigits);
+Mat_<float> extractFeatures(const vector<Mat> &trainDigits);
 Ptr<SVM> trainSVM(const Mat_<float> &dataMat, const Mat_<int> &labelMat);
 Mat_<int> getPredictLabels(Ptr<SVM> svm, const Mat_<float> &testMat);
 float getAccuracy(const Mat_<int> &testLabels, const Mat_<int> &predictLabels);
 
 int main(int argc, char* argv[]) {
-	vector<Mat> trainDigits = readDigits("dataset/train-images.idx3-ubyte");
-	vector<Mat> testDigits = readDigits("dataset/t10k-images.idx3-ubyte");
-	Mat_<int> trainLabels = readLabels("dataset/train-labels.idx1-ubyte");
-	Mat_<int> testLabels = readLabels("dataset/t10k-labels.idx1-ubyte");
+	ifstream file;
 
-	Mat_<float> trainFeatures = extractFeatures(trainDigits);
-	Mat_<float> testFeatures = extractFeatures(testDigits);
-	trainDigits.clear();
-	testDigits.clear();
+	file.open("dataset/mysvm.xml");
 
-	Ptr<SVM> svm = trainSVM(trainFeatures, trainLabels);
-	svm->save("dataset/mysvm.xml");
+	if (!file.is_open()) {
+		vector<Mat> trainDigits = readDigits("dataset/train-images.idx3-ubyte");
+		vector<Mat> testDigits = readDigits("dataset/t10k-images.idx3-ubyte");
+		Mat_<int> trainLabels = readLabels("dataset/train-labels.idx1-ubyte");
+		Mat_<int> testLabels = readLabels("dataset/t10k-labels.idx1-ubyte");
 
-	trainFeatures.release();
-	trainLabels.release();
+		Mat_<float> trainFeatures = extractFeatures(trainDigits);
+		Mat_<float> testFeatures = extractFeatures(testDigits);
+		trainDigits.clear();
+		testDigits.clear();
 
-	Mat_<int> predictLabels = getPredictLabels(svm, testFeatures);
+		Ptr<SVM> svm = trainSVM(trainFeatures, trainLabels);
+		svm->save("dataset/mysvm.xml");
 
-	float result = getAccuracy(testLabels, predictLabels);
-	cout << result << endl;
+		trainFeatures.release();
+		trainLabels.release();
+
+		Mat_<int> predictLabels = getPredictLabels(svm, testFeatures);
+		testFeatures.release();
+
+		float result = getAccuracy(testLabels, predictLabels);
+		cout << "The accuracy of the SVM is " << result << endl;
+	}
+	else {
+		vector<Mat> testDigits = readDigits("dataset/t10k-images.idx3-ubyte");
+		Mat_<float> testFeatures = extractFeatures(testDigits);
+
+		testDigits.clear();
+
+		Ptr<SVM> svm = Algorithm::load<SVM>("dataset/mysvm.xml");
+
+		Mat_<int> predictLabels = getPredictLabels(svm, testFeatures);
+		testFeatures.release();
+
+		Mat_<int> testLabels = readLabels("dataset/t10k-labels.idx1-ubyte");
+
+		float result = getAccuracy(testLabels, predictLabels);
+		cout << "The accuracy of the SVM is " << result << endl;
+	}
 
 	int t;
 	cin >> t;
@@ -61,40 +84,44 @@ Ptr<SVM> trainSVM(const Mat_<float> &dataMat, const Mat_<int> &labelMat) {
 	cout << "SVM training start." << endl;
 
 	Ptr<SVM> svm = SVM::create();
+
 	svm->setType(SVM::Types::C_SVC);
 	svm->setKernel(SVM::KernelTypes::LINEAR);
 	//svm->setDegree(0);  // for poly
 	//svm->setGamma(20);  // for poly/rbf/sigmoid
 	//svm->setCoef0(0);   // for poly/sigmoid
-	//svm->setC(7);       // for CV_SVM_C_SVC, CV_SVM_EPS_SVR and CV_SVM_NU_SVR
+	//svm->setC(1);       // for CV_SVM_C_SVC, CV_SVM_EPS_SVR and CV_SVM_NU_SVR
 	//svm->setNu(0);      // for CV_SVM_NU_SVC, CV_SVM_ONE_CLASS, and CV_SVM_NU_SVR
 	//svm->setP(0);       // for CV_SVM_EPS_SVR
 
-	svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, 1000, 1E-6));
+	svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, 1000, FLT_EPSILON));
 
-	svm->train(dataMat, SampleTypes::ROW_SAMPLE, labelMat);
+	Ptr<TrainData> trainData = TrainData::create(dataMat, SampleTypes::ROW_SAMPLE, labelMat);
+	svm->trainAuto(trainData);
 
 	cout << "SVM Training Completed." << endl;
 
 	return svm;
 }
 
-Mat_<float> extractFeatures(vector<Mat> trainDigits) {
-	Mat_<float> dataMat(trainDigits.size(), 324);
-
+Mat_<float> extractFeatures(const vector<Mat> &digits) {
+	Mat_<float> dataMat(digits.size(), 324);
 	dataMat.setTo(0);
-	cout << "Start to extract." << endl;
 
-	for (int i = 0; i < trainDigits.size(); i++) {
-		HOGDescriptor *hog = new HOGDescriptor(cvSize(28, 28), cvSize(14, 14), cvSize(7, 7), cvSize(7, 7), 9);
+	cout << "Start extracting feature." << endl;
+
+	for (int i = 0; i < digits.size(); i++) {
+		HOGDescriptor *hog = new HOGDescriptor(Size(28, 28), Size(14, 14), Size(7, 7), Size(7, 7), 9);
 		vector<float> descriptors;
-		hog->compute(trainDigits[i], descriptors, Size(1, 1), Size(0, 0));
+		hog->compute(digits[i], descriptors, Size(1, 1), Size(0, 0));
 
 		assert(descriptors.size() == 324);
 
 		for (int j = 0; j < descriptors.size(); j++) {
 			dataMat.at<float>(i, j) = descriptors[j];
 		}
+
+		delete hog;
 	}
 
 	cout << "Finish extracting." << endl;
@@ -102,11 +129,12 @@ Mat_<float> extractFeatures(vector<Mat> trainDigits) {
 	return dataMat;
 }
 
-vector<Mat> readDigits(string filepath) {
+vector<Mat> readDigits(string filePath) {
 	ifstream file;
 	vector<Mat> digits;
 
-	file.open(filepath);
+	// You must open ios_base::binary in Windows.
+	file.open(filePath, ios_base::in | ios_base::binary);
 
 	if (!file.is_open()) {
 		cout << "File Not Found!" << endl;
@@ -134,20 +162,23 @@ vector<Mat> readDigits(string filepath) {
 
 		cout << "No. of images:" << number_of_images << endl;;
 
-		int idx = 0;
 		Mat img;
+		unsigned char *temp = new unsigned char[n_rows * n_cols];
 
-		// Reading images
+		// Reading images.
 		for (long int i = 0; i < number_of_images; ++i) {
 			img.create(n_rows, n_cols, CV_8UC1);
+	
+			file.read((char*)temp, sizeof(unsigned char) * n_rows * n_cols);
 
 			for (int r = 0; r < n_rows; ++r) {
 				for (int c = 0; c < n_cols; ++c) {
-					unsigned char temp = 0;
-					file.read((char*)&temp, sizeof(temp));
-					img.at<uchar>(r, c) = temp;
+					img.at<uchar>(r, c) = temp[r * n_rows + c];
 				}
 			}
+
+			//imshow("img", img);
+			//waitKey(0);
 
 			digits.push_back(img);
 			img.release();
@@ -166,7 +197,8 @@ Mat_<int> readLabels(string filePath) {
 	Mat_<int> labels;
 	ifstream file;
 
-	file.open(filePath);
+	// You must open ios_base::binary in Windows.
+	file.open(filePath, ios_base::in | ios_base::binary);
 
 	if (!file.is_open()) {
 		cout << "File Not Found!";
@@ -207,7 +239,8 @@ Mat_<int> getPredictLabels(Ptr<SVM> svm, const Mat_<float> &testMat) {
 	Mat_<int> predictLabels(testMat.rows, 1);
 
 	for (int i = 0; i < testMat.rows; i++) {
-		predictLabels.at<int>(i, 0) = (int)svm->predict(testMat.row(i));
+		float res = svm->predict(testMat.row(i));
+		predictLabels.at<int>(i, 0) = (int)res;
 	}
 
 	return predictLabels;
