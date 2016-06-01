@@ -14,8 +14,8 @@ Win 8 64bits, VS 2013, openCV 3.0.
   - Using Hog feature as trianing input.
 - Adaboost
   - Accuracy: 0.9658 for 10000 testing images.
-  - Using Hog feature as trianing input. **May as a negative effect on accuracy. **
-  - 'Unroll' the database to transform the multi-class problem into 2-class problem. ** Check the code for detail.
+  - Using Hog feature as trianing input. *May as a negative effect on accuracy.*
+  - 'Unroll' the database to transform the multi-class problem into 2-class problem. *Check the code for detail.*
 
 ### Areas for improvement
 - A better feature for this situation.
