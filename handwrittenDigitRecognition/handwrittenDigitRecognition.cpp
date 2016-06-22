@@ -9,11 +9,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <time.h>
+#include <io.h>
+#include <vector>
 
 #include <opencv/cv.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/ml.hpp>
 #include <opencv2/objdetect.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 
 using namespace cv;
 using namespace cv::ml;
@@ -21,6 +24,12 @@ using namespace std;
 
 int random(int min, int max);
 int reverseDigit(int i);
+void getAllFormatFiles(string path, vector<string>& files, string format);
+
+// --------------
+// Basic function for training and predicting.
+void exampleForTrainAndPredictMNIST();
+
 vector<Mat> readDigits(string filepath);
 Mat_<int> readLabels(string filePath);
 Mat_<float> extractFeatures(const vector<Mat> &trainDigits);
@@ -30,7 +39,118 @@ Mat_<int> getPredictLabels(Ptr<SVM> svm, const Mat_<float> &testMat);
 Mat_<int> getPredictLabels(Ptr<Boost> boost, const Mat_<float> &testMat);
 float getAccuracy(const Mat_<int> &testLabels, const Mat_<int> &predictLabels);
 
+// --------------
+
+void cutDigitsAndPredict(Mat src);
+
+int thresh = 100;
+int max_thresh = 255;
+RNG rng(12345);
+
 int main(int argc, char* argv[]) {
+	vector<string> img_paths;
+	getAllFormatFiles("dataset/", img_paths, "jpg");
+
+	for (int i = 0; i < img_paths.size(); i++) {
+		Mat src = imread(img_paths[i]);
+
+		cutDigitsAndPredict(src);
+	}
+
+	return 0;
+}
+
+void cutDigitsAndPredict(Mat src) {
+	Mat src_gray;
+
+	cvtColor(src, src_gray, COLOR_BGR2GRAY);
+
+	Mat threshold_output;
+	threshold(src_gray, threshold_output, 0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+	imshow("t", threshold_output);
+	waitKey(0);
+
+	int size = 2;
+	Mat element = getStructuringElement(MORPH_RECT,
+		Size(2 * size + 1, 2 * size + 1),
+		Point(size, size));
+	erode(threshold_output, threshold_output, element);
+	imshow("t", threshold_output);
+	waitKey(0);
+
+	// Detect edges using canny
+	Mat canny_output;
+	Canny(threshold_output, canny_output, thresh, thresh * 2, 3);
+	//imshow("t", canny_output);
+	//waitKey(0);
+
+	/// Find contours
+	vector<vector<Point> > contours;
+	vector<Vec4i> hierarchy;
+
+	findContours(canny_output, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE, Point(0, 0));
+
+	/// Get bounding rects
+	vector<Rect> boundRect(contours.size());
+
+	for (int i = 0; i < contours.size(); i++) {
+		boundRect[i] = boundingRect(Mat(contours[i]));
+	}
+
+	int max_area = -1;
+	Rect max_rect;
+	for (int i = 0; i < contours.size(); i++)
+	{
+		if (boundRect[i].area() > max_area) {
+			max_area = boundRect[i].area();
+			max_rect = boundRect[i];
+		}
+	}
+
+	vector<Mat> digits;
+
+	/// Extract digits from image and draw bonding rects.
+	int prev_area = -1;
+	for (int i = 0; i < contours.size(); i++)
+	{
+		if (boundRect[i].area() == prev_area || boundRect[i].area() < 300 || boundRect[i].area() > 20000) {
+			continue;
+		}
+		prev_area = boundRect[i].size().area();
+
+		Mat digit = src(boundRect[i]).clone();
+		resize(digit, digit, Size(28, 28));
+		cvtColor(digit, digit, COLOR_BGR2GRAY);
+		threshold(digit, digit, 0, 255, CV_THRESH_BINARY_INV | CV_THRESH_OTSU);
+		digits.push_back(digit);
+
+		/// Draw bonding rects.
+		Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
+		rectangle(src, boundRect[i].tl(), boundRect[i].br(), color, 2, 8, 0);
+	}
+
+	imshow("result", src);
+	waitKey(0);
+
+	// Predict lables using SVM.
+	ifstream file;
+	file.open("dataset/mysvm.xml");
+	assert(file.is_open());
+
+	Ptr<SVM> svm = Algorithm::load<SVM>("dataset/mysvm.xml");
+	Mat_<float> features = extractFeatures(digits);
+
+	for (int i = 0; i < features.rows; i++) {
+		float res = svm->predict(features.row(i));
+		
+		cout << res << endl;
+		imshow("t", digits[i]);
+		waitKey(0);
+	}
+
+}
+
+void exampleForTrainAndPredictMNIST() {
 	ifstream file1, file2;
 
 	vector<Mat> testDigits = readDigits("dataset/t10k-images.idx3-ubyte");
@@ -92,7 +212,7 @@ int main(int argc, char* argv[]) {
 			Mat_<int> predictLabels = getPredictLabels(boost, testFeatures);
 
 			float result = getAccuracy(testLabels, predictLabels);
-			cout << "The accuracy of the Adaboost is " << result << ", totally " << predictLabels.size().height<< " images." << endl;
+			cout << "The accuracy of the Adaboost is " << result << ", totally " << predictLabels.size().height << " images." << endl;
 
 
 			cout << "\nWould you want to see some Adaboost test cases?" << endl;
@@ -164,8 +284,6 @@ int main(int argc, char* argv[]) {
 			float result = getAccuracy(testLabels, predictLabels);
 			cout << "The accuracy of the Adaboost is " << result << ", totally " << predictLabels.size().height << " images." << endl;
 
-
-
 			cout << "\nWould you want to see some Adaboost test cases?" << endl;
 			cout << "Press y to see, n to skip." << endl;
 			char t;
@@ -196,53 +314,9 @@ int main(int argc, char* argv[]) {
 	file1.close();
 	file2.close();
 
-	//file.open("dataset/myboost.xml");
-
-	//if (!file.is_open()) {
-	//	vector<Mat> trainDigits = readDigits("dataset/train-images.idx3-ubyte");
-	//	vector<Mat> testDigits = readDigits("dataset/t10k-images.idx3-ubyte");
-	//	Mat_<int> trainLabels = readLabels("dataset/train-labels.idx1-ubyte");
-	//	Mat_<int> testLabels = readLabels("dataset/t10k-labels.idx1-ubyte");
-
-	//	Mat_<float> trainFeatures = extractFeatures(trainDigits);
-	//	Mat_<float> testFeatures = extractFeatures(testDigits);
-	//	trainDigits.clear();
-	//	testDigits.clear();
-
-	//	Ptr<Boost> boost = trainBoost(trainFeatures, trainLabels);
-	//	boost->save("dataset/myboost.xml");
-
-	//	//trainFeatures.release();
-	//	//trainLabels.release();
-
-	//	//Mat_<int> predictLabels = getPredictLabels(svm, testFeatures);
-	//	//testFeatures.release();
-
-	//	//float result = getAccuracy(testLabels, predictLabels);
-	//	//cout << "The accuracy of the SVM is " << result << endl;
-	//}
-	//else {
-	//	vector<Mat> testDigits = readDigits("dataset/t10k-images.idx3-ubyte");
-	//	Mat_<float> testFeatures = extractFeatures(testDigits);
-
-	//	testDigits.clear();
-
-	//	Ptr<Boost> boost = Algorithm::load<Boost>("dataset/myboost.xml");
-
-	//	Mat_<int> predictLabels = getPredictLabels(boost, testFeatures);
-	//	testFeatures.release();
-
-	//	Mat_<int> testLabels = readLabels("dataset/t10k-labels.idx1-ubyte");
-
-	//	float result = getAccuracy(testLabels, predictLabels);
-	//	cout << "The accuracy of the adaboost is " << result << endl;
-	//}
-
 	cout << "\nPress any key to quit" << endl;
 	char t;
 	cin >> t;
-
-	return 0;
 }
 
 Ptr<SVM> trainSVM(const Mat_<float> &dataMat, const Mat_<int> &labelMat) {
@@ -541,4 +615,26 @@ int random(int min, int max) {
 	assert(max > min);
 
 	return rand() % (max - min + 1) + min;
+}
+
+void getAllFormatFiles(string path, vector<string>& files, string format) {
+	long   hFile = 0;
+	struct _finddata_t fileinfo;
+	string p;
+	if ((hFile = _findfirst(p.assign(path).append("\\*" + format).c_str(), &fileinfo)) != -1) {
+		do {
+			if ((fileinfo.attrib &  _A_SUBDIR)) {
+				if (strcmp(fileinfo.name, ".") != 0 && strcmp(fileinfo.name, "..") != 0)
+				{
+					//files.push_back(p.assign(path).append("\\").append(fileinfo.name) );  
+					getAllFormatFiles(p.assign(path).append("\\").append(fileinfo.name), files, format);
+				}
+			}
+			else {
+				files.push_back(p.assign(path).append("\\").append(fileinfo.name));
+			}
+		} while (_findnext(hFile, &fileinfo) == 0);
+
+		_findclose(hFile);
+	}
 }
