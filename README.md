@@ -1,5 +1,5 @@
 # HandwrittenDigitRecognition
-A solution for handwritten digit recognition based on openCV 3.0.
+An **incomplete** solution for handwritten digit recognition based on openCV 3.0.
 
 ### Development Environment
 Win 8 64bits, VS 2013, openCV 3.0.
